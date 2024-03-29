@@ -7,3 +7,7 @@
 
 ### Why
 I'm lazy. [Again](https://github.com/Szybet/kobo-screen-mirror)
+
+### Some notes
+- Works best with a external USB-UART adapter. Best speeds
+- **Works without a screen!**
