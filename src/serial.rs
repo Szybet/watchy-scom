@@ -4,10 +4,7 @@ use image::{ImageBuffer, ImageFormat, Rgb};
 use log::{debug, error, info};
 use serialport::{self, SerialPort};
 use std::{
-    io::Read,
-    process::exit,
-    sync::mpsc::{Receiver, Sender},
-    time::Duration,
+    io::Read, sync::mpsc::{Receiver, Sender}, thread, time::{self, Duration}
 };
 
 pub fn main(
@@ -51,6 +48,15 @@ pub fn main(
                             .open()
                             .expect("Failed to open port"),
                     );
+                    thread::sleep(time::Duration::from_millis(1500));
+                    if let Some(ref mut rport) = port {
+                        if rport.write_all("screen:".as_bytes()).is_err() {
+                            error!("Failed to write screen message");
+                        }
+                        if rport.flush().is_err() {
+                            error!("Failed to flush");
+                        };
+                    }
                 }
                 SendMessage(x) => {
                     if let Some(ref mut rport) = port {
@@ -66,10 +72,10 @@ pub fn main(
                     }
                 }
             },
-            Err(x) => {
+            Err(_x) => {
                 /*
-                if x.to_string() != "receiving on an empty channel" {
-                    error!("Failed to recv in serial: {}", x);
+                if _x.to_string() != "receiving on an empty channel" {
+                    error!("Failed to recv in serial: {}", _x);
                 }
                 */
             }
@@ -77,8 +83,8 @@ pub fn main(
         if let Some(ref mut rport) = port {
             //debug!("Reading from port...");
             let mut serial_buf_tmp: Vec<u8> = vec![0; 7000];
-            let readed = rport.read(serial_buf_tmp.as_mut_slice()).unwrap();
-            //debug!("Readed bytes: {}", readed);
+            let _readed = rport.read(serial_buf_tmp.as_mut_slice()).unwrap();
+            //debug!("Readed bytes: {}", _readed);
             //debug!("Pure dump: {}", String::from_utf8_lossy(&serial_buf_tmp));
             let mut done = false;
             // eof

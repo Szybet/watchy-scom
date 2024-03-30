@@ -8,10 +8,9 @@ use defines::{SendToGui, SendToSerial};
 use eframe::egui;
 use egui::{Color32, Vec2};
 use egui_extras::RetainedImage;
-use env_logger::fmt::Color;
-use image::{ImageBuffer, Rgb};
 use log::{debug, error};
 use regex::Regex;
+use std::process::Command;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
@@ -26,7 +25,7 @@ fn main() -> Result<(), eframe::Error> {
 
     env_logger::init();
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 600.0]),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1200.0, 650.0]),
         ..Default::default()
     };
 
@@ -91,10 +90,10 @@ impl eframe::App for MyApp {
                         self.image = x;
                     }
                 },
-                Err(x) => {
+                Err(_x) => {
                     /*
-                    if x.to_string() != "receiving on an empty channel" {
-                        error!("Failed to recv in gui: {}", x);
+                    if _x.to_string() != "receiving on an empty channel" {
+                        error!("Failed to recv in gui: {}", _x);
                     }
                     */
                 }
@@ -109,7 +108,7 @@ impl eframe::App for MyApp {
 
                         ui.label("Input the baud rate");
 
-                        let response = ui.add(egui::TextEdit::singleline(&mut self.baud_rate));
+                        ui.add(egui::TextEdit::singleline(&mut self.baud_rate));
 
                         if ui.add(egui::Button::new("Scan for ports")).clicked() {
                             if self.tx_serial.send(AskForPorts()).is_err() {
@@ -200,6 +199,18 @@ impl eframe::App for MyApp {
                                 .unwrap();
                         }
                     });
+                    if !self.image.is_empty() {
+                        ui.horizontal(|ui| {
+                            if ui.add(egui::Button::new("Open screen")).clicked() {
+                                debug!("Button to save image clicked");
+                                let _ = std::fs::write("/tmp/watchy-scom.png", &self.image.clone());
+                                Command::new("kolourpaint")
+                                    .arg("/tmp/watchy-scom.png")
+                                    .spawn()
+                                    .expect("failed to execute process");
+                            }
+                        });
+                    }
                 }
                 if !self.image.is_empty() {
                     ui.horizontal_centered(|ui| {
