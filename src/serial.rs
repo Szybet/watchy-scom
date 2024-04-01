@@ -4,8 +4,29 @@ use image::{ImageBuffer, ImageFormat, Rgb};
 use log::{debug, error, info};
 use serialport::{self, SerialPort};
 use std::{
-    io::Read, sync::mpsc::{Receiver, Sender}, thread, time::{self, Duration}
+    io::Read,
+    ops::Deref,
+    sync::mpsc::{Receiver, Sender},
+    thread,
+    time::{self, Duration},
 };
+
+fn find_subsequence(vector: &[u8], subsequence: &[u8]) -> Option<usize> {
+
+    if subsequence.len() as isize > vector.len() as isize - subsequence.len() as isize{
+        return None;
+    }
+
+    for i in 0..=(vector.len() - subsequence.len()) {
+        if vector[i..].starts_with(subsequence) {
+            //debug!("Found subsequence of: {} in vec, it looks like: {}", String::from_utf8_lossy(subsequence), String::from_utf8_lossy(&vector[i..i + subsequence.len()]));
+            //debug!("It's at position: {}", i);
+            //debug!("Pure dump of this vector: {:?}", String::from_utf8_lossy(&vector));
+            return Some(i);
+        }
+    }
+    None
+}
 
 pub fn main(
     tx_gui: &mut Sender<crate::defines::SendToGui>,
@@ -14,8 +35,19 @@ pub fn main(
     let mut port: Option<Box<dyn SerialPort>> = None;
     let mut serial_buf: Vec<u8> = Vec::with_capacity(16000); // 15000 is screen size
     let mut synced = false;
+
+    let packets_length = 16;
+    // thisisastartpacket
+    let start_packet: Vec<u8> = vec![
+        116, 104, 105, 115, 105, 115, 97, 115, 116, 97, 114, 116, 112, 97, 99, 107,
+    ];
+    // thisisaendddpacket
+    let end_packet: Vec<u8> = vec![
+        116, 104, 105, 115, 105, 115, 97, 101, 110, 100, 100, 100, 112, 97, 99, 107,
+    ];
+
     loop {
-        match rx_serial.recv_timeout(Duration::from_millis(110)) {
+        match rx_serial.recv_timeout(Duration::from_millis(40)) {
             Ok(x) => match x {
                 AskForPorts() => {
                     debug!("Received ask for ports");
@@ -44,11 +76,11 @@ pub fn main(
                     debug!("Received select port: {}", port_name);
                     port = Some(
                         serialport::new(port_name, baud_rate as u32) // ??? TODO: here 115_200 56000
-                            .timeout(Duration::from_millis(30000))
+                            .timeout(Duration::from_millis(50000))
                             .open()
                             .expect("Failed to open port"),
                     );
-                    thread::sleep(time::Duration::from_millis(1500));
+                    thread::sleep(time::Duration::from_millis(500));
                     if let Some(ref mut rport) = port {
                         if rport.write_all("screen:".as_bytes()).is_err() {
                             error!("Failed to write screen message");
@@ -86,96 +118,45 @@ pub fn main(
             let _readed = rport.read(serial_buf_tmp.as_mut_slice()).unwrap();
             //debug!("Readed bytes: {}", _readed);
             //debug!("Pure dump: {}", String::from_utf8_lossy(&serial_buf_tmp));
-            let mut done = false;
-            // eof
-            if serial_buf_tmp.contains(&26) {
-                //debug!("it contains eof!");
+
+            let real_serial_buf_tmp = &serial_buf_tmp[0.._readed].to_owned();
+            serial_buf.extend(real_serial_buf_tmp);
+            if let Some(end_pos) = find_subsequence(&serial_buf, &end_packet) {
                 if !synced {
                     synced = true;
                     serial_buf.clear();
-                    serial_buf_tmp.clear();
                     debug!("SYNCED!");
                     continue;
                 }
-                done = true;
-            }
-            serial_buf.extend(serial_buf_tmp);
-            if done {
-                //debug!("serial_buf len: {}", serial_buf.len());
-                let mut logs: Vec<u8> = Vec::new();
-                let mut screen: Vec<u8> = Vec::new();
-                let mut rest: Vec<u8> = Vec::new();
-                let mut screen_now = false;
-                let mut screen_done = false;
-                for b in serial_buf.clone() {
-                    if !screen_now {
-                        if b == 140 {
-                            screen_now = true;
-                        } else {
-                            logs.push(b);
-                        }
-                    } else {
-                        if b == 26 {
-                            screen_done = true;
-                        } else {
-                            if !screen_done {
-                                screen.push(b);
-                            } else {
-                                rest.push(b);
-                            }
-                        }
+                if let Some(start_pos) = find_subsequence(&serial_buf, &start_packet) {
+                    debug!("it contains both packets!");
+                    debug!("start_pos :{}", start_pos);
+                    debug!("end_pos :{}", end_pos);
+                    debug!("serial_buf.len(): {}", serial_buf.len());
+
+                    if end_pos < start_pos {
+                        error!("End pos is above start pos, how? skipping...");
+                        serial_buf.clear();
+                        continue;
                     }
-                }
-                serial_buf.clear();
-                serial_buf.extend(rest);
+                    //debug!("serial_buf len: {}", serial_buf.len());
+                    let logs = serial_buf[0..start_pos].to_owned();
+                    let screen = serial_buf[start_pos + packets_length..end_pos].to_owned();
+                    let rest = serial_buf[end_pos + packets_length..serial_buf.len()].to_owned();
 
-                let real_logs = String::from_utf8_lossy(&logs);
-                //debug!("Real logs: {}", real_logs);
-                if tx_gui.send(LogToShow(real_logs.to_string())).is_err() {
-                    error!("Failed to send logs to gui");
-                }
-
-                // No screen in there
-                if !screen_now {
-                    //debug!("There is no screen");
-                    continue;
-                }
-
-                let screen_stringed: Vec<char> = String::from_utf8_lossy(&screen)
-                    .chars()
-                    .filter(|c| c.is_whitespace() || c.is_ascii_graphic())
-                    .collect(); // thats the solution to the len problem
-                                // Fixed value of how many there should be
-                if screen_stringed.len() != 15000 {
-                    debug!("Screen len is: {}", screen.len());
-                    error!("screen_stringed len: {}", screen_stringed.len());
-                    continue;
-                }
-                let mut real_screen: Vec<u8> = Vec::new();
-                let mut success = true;
-                for i in (0..screen_stringed.len() - 1).step_by(3) {
-                    let str = format!(
-                        "{}{}{}",
-                        screen_stringed[i],
-                        screen_stringed[i + 1],
-                        screen_stringed[i + 2]
-                    );
-                    if let Ok(real_byte) = str.parse::<u8>() {
-                        real_screen.push(real_byte);
-                    } else {
-                        error!("The invalid byte is: {} at position: {}", str, i);
-                        debug!(
-                            "Screen from serial dump: '{}'",
-                            String::from_utf8_lossy(&screen)
-                        );
-                        success = false;
-                        break;
+                    let real_logs = String::from_utf8_lossy(&logs);
+                    //debug!("Real logs: {}", real_logs);
+                    if tx_gui.send(LogToShow(real_logs.to_string())).is_err() {
+                        error!("Failed to send logs to gui");
                     }
-                    //let the_byte = format!("{}{}{}", char::from(screen[i]), char::from(screen[i + 1]), char::from(screen[i + 2])).parse::<u8>().unwrap();
-                }
-                if success {
+
+                    if screen.len() != 5000 {
+                        error!("Screen len is: {}", screen.len());
+                    }
                     info!("Screen succesfully readed");
-                    debug!("real_screen len is: {}", real_screen.len());
+
+                    //debug!("Real screen utf8: {}", String::from_utf8_lossy(&screen));
+                    //debug!("Real screen bytes: {:?}", screen);
 
                     info!("Creating the image");
                     let mut img = ImageBuffer::<Rgb<u8>, _>::new(200, 200);
@@ -184,27 +165,40 @@ pub fn main(
                             let index = (y * 200 + x) / 8;
                             let bit_offset = 7 - ((y * 200 + x) % 8);
 
-                            let bit = (real_screen[index] >> bit_offset) & 1;
+                            let i_option = screen.get(index);
+                            if let Some(i) = i_option {
+                                let bit = (i >> bit_offset) & 1;
 
-                            let color = if bit == 0 {
-                                Rgb([0, 0, 0])
+                                let color = if bit == 0 {
+                                    Rgb([0, 0, 0])
+                                } else {
+                                    Rgb([255, 255, 255])
+                                };
+
+                                img.put_pixel(x as u32, y as u32, color);
                             } else {
-                                Rgb([255, 255, 255])
-                            };
-
-                            img.put_pixel(x as u32, y as u32, color);
+                                //error!("Error creating image, pixels missing");
+                                img.put_pixel(x as u32, y as u32, Rgb([255, 0, 0]));
+                            }
                         }
                     }
-                    /*
-                    let bytes: Vec<Result<u8, _>> = img.bytes().collect();
-                    let bytes_pure: Vec<u8> = img.bytes().map(|result| result.unwrap()).collect();
-                    let _ = tx_gui.send(ShowPng(bytes_pure));
-                    */
                     let mut buffer = std::io::Cursor::new(Vec::new());
                     img.write_to(&mut buffer, ImageFormat::Png).unwrap();
                     if tx_gui.send(ShowPng(buffer.into_inner())).is_err() {
                         error!("Failed to send png to gui");
                     }
+
+                    serial_buf.clear();
+                    serial_buf.extend(rest);
+                } else {
+                    debug!("Found only end packet");
+                    let logs = &serial_buf[0..end_pos];
+                    let real_logs = String::from_utf8_lossy(&logs);
+                    //debug!("Real logs: {}", real_logs);
+                    if tx_gui.send(LogToShow(real_logs.to_string())).is_err() {
+                        error!("Failed to send logs to gui");
+                    }
+                    serial_buf.clear();
                 }
             }
         }

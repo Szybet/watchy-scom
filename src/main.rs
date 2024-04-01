@@ -75,15 +75,25 @@ impl eframe::App for MyApp {
                     SendToGui::Ports(x) => {
                         self.ports = x;
                     }
-                    SendToGui::LogToShow(x) => {
-                        debug!("Received logs to show: {}", x);
-                        // Cleans numbers more than 16 if screen gets here
-                        let re = Regex::new(r"\b\d{16,}\b").unwrap();
-                        // Matches non-standard crappy characters
-                        let re_non_standard = Regex::new(r"[^\p{L}\p{N}\p{P}\s]").unwrap();
-                        let result = re.replace_all(&x, "");
-                        let result2 = re_non_standard.replace_all(&result, "");
-                        self.logs.push_str(&result2.clone()); // not sure about the clone
+                    SendToGui::LogToShow(input) => {
+                        debug!("Received logs to show: {}", input);
+                        // Cleans
+                        let re = Regex::new(r"^src/.*").unwrap();
+                        let mut filtered_lines = String::new();
+                        for line in input.lines() {
+                            if re.is_match(line) {
+                                filtered_lines.push_str(line);
+                                filtered_lines.push('\n'); // Add a newline character to separate lines
+                            } else {
+                                if !line.is_empty() {
+                                    error!("Rejected line: {}", line);
+                                }
+                            }
+                        }
+
+                        filtered_lines = filtered_lines.replace("\n\n", "\n");
+                        //let result2 = re_non_standard.replace_all(&result, "");
+                        self.logs.push_str(&filtered_lines.clone()); // not sure about the clone
                     }
                     SendToGui::ShowPng(x) => {
                         debug!("Received png");
@@ -199,8 +209,14 @@ impl eframe::App for MyApp {
                                 .unwrap();
                         }
                     });
-                    if !self.image.is_empty() {
-                        ui.horizontal(|ui| {
+                    ui.horizontal(|ui| {
+                        if ui.add(egui::Button::new("Update screen")).clicked() {
+                            debug!("Button to update screen clicked");
+                            self.tx_serial
+                                .send(SendMessage("screen:".to_string()))
+                                .unwrap();
+                        }
+                        if !self.image.is_empty() {
                             if ui.add(egui::Button::new("Open screen")).clicked() {
                                 debug!("Button to save image clicked");
                                 let _ = std::fs::write("/tmp/watchy-scom.png", &self.image.clone());
@@ -209,8 +225,8 @@ impl eframe::App for MyApp {
                                     .spawn()
                                     .expect("failed to execute process");
                             }
-                        });
-                    }
+                        }
+                    });
                 }
                 if !self.image.is_empty() {
                     ui.horizontal_centered(|ui| {
@@ -242,7 +258,7 @@ impl eframe::App for MyApp {
                         });
                 });
 
-            ctx.request_repaint_after(Duration::from_millis(200));
+            ctx.request_repaint_after(Duration::from_millis(40));
         });
     }
 }
