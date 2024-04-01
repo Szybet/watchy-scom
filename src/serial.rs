@@ -5,15 +5,13 @@ use log::{debug, error, info};
 use serialport::{self, SerialPort};
 use std::{
     io::Read,
-    ops::Deref,
     sync::mpsc::{Receiver, Sender},
     thread,
     time::{self, Duration},
 };
 
 fn find_subsequence(vector: &[u8], subsequence: &[u8]) -> Option<usize> {
-
-    if subsequence.len() as isize > vector.len() as isize - subsequence.len() as isize{
+    if subsequence.len() as isize > vector.len() as isize - subsequence.len() as isize {
         return None;
     }
 
@@ -80,7 +78,7 @@ pub fn main(
                             .open()
                             .expect("Failed to open port"),
                     );
-                    thread::sleep(time::Duration::from_millis(500));
+                    thread::sleep(time::Duration::from_millis(100));
                     if let Some(ref mut rport) = port {
                         if rport.write_all("screen:".as_bytes()).is_err() {
                             error!("Failed to write screen message");
@@ -126,6 +124,12 @@ pub fn main(
                     synced = true;
                     serial_buf.clear();
                     debug!("SYNCED!");
+                    if rport.write_all("screen:".as_bytes()).is_err() {
+                        error!("Failed to write screen message");
+                    }
+                    if rport.flush().is_err() {
+                        error!("Failed to flush");
+                    };
                     continue;
                 }
                 if let Some(start_pos) = find_subsequence(&serial_buf, &start_packet) {
