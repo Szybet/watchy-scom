@@ -87,6 +87,17 @@ impl eframe::App for MyApp {
                             } else {
                                 if !line.is_empty() {
                                     error!("Rejected line: {}", line);
+                                    let regex = Regex::new("[^\x00-\x7F]").unwrap();
+                                
+                                    let matches: Vec<_> = regex.find_iter(line).collect();
+                                
+                                    // Check if the number of weird bytes exceeds 30
+                                    if matches.len() > 30 {
+                                        debug!("We probably catched the scren, requesting an update...");
+                                        self.tx_serial
+                                            .send(SendMessage("screen:".to_string()))
+                                            .unwrap();
+                                    }
                                 }
                             }
                         }

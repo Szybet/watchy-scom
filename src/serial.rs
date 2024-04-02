@@ -74,7 +74,7 @@ pub fn main(
                     debug!("Received select port: {}", port_name);
                     port = Some(
                         serialport::new(port_name, baud_rate as u32) // ??? TODO: here 115_200 56000
-                            .timeout(Duration::from_millis(50000))
+                            .timeout(Duration::from_millis(9999999))
                             .open()
                             .expect("Failed to open port"),
                     );
@@ -113,6 +113,11 @@ pub fn main(
         if let Some(ref mut rport) = port {
             //debug!("Reading from port...");
             let mut serial_buf_tmp: Vec<u8> = vec![0; 7000];
+            if let Ok(btr) = rport.bytes_to_read() {
+                if btr == 0 {
+                    continue;
+                }
+            }
             let _readed = rport.read(serial_buf_tmp.as_mut_slice()).unwrap();
             //debug!("Readed bytes: {}", _readed);
             //debug!("Pure dump: {}", String::from_utf8_lossy(&serial_buf_tmp));
@@ -150,8 +155,10 @@ pub fn main(
 
                     let real_logs = String::from_utf8_lossy(&logs);
                     //debug!("Real logs: {}", real_logs);
-                    if tx_gui.send(LogToShow(real_logs.to_string())).is_err() {
-                        error!("Failed to send logs to gui");
+                    if !real_logs.is_empty() {
+                        if tx_gui.send(LogToShow(real_logs.to_string())).is_err() {
+                            error!("Failed to send logs to gui");
+                        }
                     }
 
                     if screen.len() != 5000 {
@@ -198,9 +205,11 @@ pub fn main(
                     debug!("Found only end packet");
                     let logs = &serial_buf[0..end_pos];
                     let real_logs = String::from_utf8_lossy(&logs);
-                    //debug!("Real logs: {}", real_logs);
-                    if tx_gui.send(LogToShow(real_logs.to_string())).is_err() {
-                        error!("Failed to send logs to gui");
+                    if !real_logs.is_empty() {
+                        //debug!("Real logs: {}", real_logs);
+                        if tx_gui.send(LogToShow(real_logs.to_string())).is_err() {
+                            error!("Failed to send logs to gui");
+                        }
                     }
                     serial_buf.clear();
                 }
