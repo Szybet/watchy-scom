@@ -7,6 +7,9 @@
 
 </details>
 
+[Demo](https://github.com/Szybet/watchy-scom/assets/53944559/550b6640-c1b0-4a76-9da0-4e79a57f696f)
+
+
 ### Supported by:
 - https://github.com/Szybet/InkWatchy
 
@@ -17,4 +20,5 @@ I'm lazy. [Again](https://github.com/Szybet/kobo-screen-mirror)
 - Works best with a external USB-UART adapter. Best speeds but the one on the watchy should work too
 - **Works without a screen!**
 - You can open the image in kolourpaint now to inspect invidual pixels, with one click!
-- The delay is minimal, look at the demo :D
+- The delay is almost nothing, look at the demo :D
+- It should work with all adafruit GFX based screen libraries, just support for changing resolution would be needed
