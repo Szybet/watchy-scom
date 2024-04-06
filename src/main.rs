@@ -236,6 +236,12 @@ impl eframe::App for MyApp {
                                     .spawn()
                                     .expect("failed to execute process");
                             }
+                            if ui.add(egui::Button::new("Reset")).clicked() {
+                                debug!("Button to reset the watchy clicked");
+                                self.tx_serial
+                                    .send(SendMessage("reset:".to_string()))
+                                    .unwrap();
+                            }
                         }
                     });
                 }
