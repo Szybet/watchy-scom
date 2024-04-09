@@ -16,6 +16,8 @@
 ### Why
 I'm lazy. [Again](https://github.com/Szybet/kobo-screen-mirror)
 
+To find another reason for this to exist, I made it work over TCP so the serial backend works on a remote device where watchy is connected. Now programming watchy using a VPN, code-server is possible. Awesome
+
 ### Some notes
 - Works best with a external USB-UART adapter. Best speeds but the one on the watchy should work too
 - **Works without a screen!**
