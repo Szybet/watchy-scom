@@ -1,5 +1,5 @@
 // Logging
-use log::{debug, info};
+use log::{debug, error, info};
 
 // Network
 use crate::api::*;
@@ -21,16 +21,8 @@ pub fn run(_handler: Arc<NodeHandler<()>>, listener: NodeListener<()>, tx_to_ser
         NetEvent::Message(_endpoint, input_data) => {
             debug!("Received raw input data with length: {}", input_data.len());
             let message: SendToSerial = bincode::deserialize(input_data).unwrap();
-            match message {
-                SendToSerial::AskForPorts() => {
-                    let _ = tx_to_serial.send(SendToSerial::AskForPorts());
-                },
-                SendToSerial::SelectPort(name, baudrate) => {
-                    let _ = tx_to_serial.send(SendToSerial::SelectPort(name, baudrate));
-                },
-                SendToSerial::SendMessage(x) => {
-                    let _ = tx_to_serial.send(SendToSerial::SendMessage(x));
-                },
+            if tx_to_serial.send(message).is_err() {
+                error!("Failed to send to serial");
             }
         }
         NetEvent::Disconnected(endpoint) => {

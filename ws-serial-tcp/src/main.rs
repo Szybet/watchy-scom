@@ -97,18 +97,12 @@ fn main() {
 
     loop {
         match rx_gui.recv() {
-            Ok(x) => match x {
-                api::SendToGui::Ports(x) => {
-                    send_network(&network_handler.clone(), endpoint_saved, SendToGui::Ports(x))
-                }
-                api::SendToGui::LogToShow(x) => {
-                    send_network(&network_handler.clone(), endpoint_saved, SendToGui::LogToShow(x))
-                }
-                api::SendToGui::ShowPng(x) => {
-                    send_network(&network_handler.clone(), endpoint_saved, SendToGui::ShowPng(x))
-                }
-            },
-            Err(_) => {}
+            Ok(x) => {
+                send_network(&network_handler.clone(), endpoint_saved, x);
+            }
+            Err(x) => {
+                error!("Failed to recv {}", x);
+            }
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::defines::SendToSerial::*;
+use crate::api::SendToSerial::*;
 use crate::SendToGui::*;
 use image::{ImageBuffer, ImageFormat, Rgb};
 use log::{debug, error, info};
@@ -27,8 +27,8 @@ fn find_subsequence(vector: &[u8], subsequence: &[u8]) -> Option<usize> {
 }
 
 pub fn main(
-    tx_gui: &mut Sender<crate::defines::SendToGui>,
-    rx_serial: &mut Receiver<crate::defines::SendToSerial>,
+    tx_gui: Sender<crate::api::SendToGui>,
+    rx_serial: Receiver<crate::api::SendToSerial>,
 ) {
     let mut port: Option<Box<dyn SerialPort>> = None;
     let mut serial_buf: Vec<u8> = Vec::with_capacity(16000); // 15000 is screen size

@@ -1,27 +1,25 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 
-pub mod defines;
+pub mod api;
 pub mod serial;
+pub mod remote;
 
 use crate::SendToSerial::*;
-use defines::{SendToGui, SendToSerial};
+use api::{SendToGui, SendToSerial};
 use eframe::egui;
 use egui::{Color32, Vec2};
 use egui_extras::RetainedImage;
 use log::{debug, error};
+use message_io::network::{RemoteAddr, ToRemoteAddr};
 use regex::Regex;
+use remote::run_remote;
 use std::process::Command;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
 fn main() -> Result<(), eframe::Error> {
-    let (tx_serial, mut rx_serial) = channel();
-    let (mut tx_gui, rx_gui) = channel();
-
-    thread::spawn(move || {
-        serial::main(&mut tx_gui, &mut rx_serial);
-    });
+    let (tx_gui, rx_gui) = channel();
 
     env_logger::init();
     let options = eframe::NativeOptions {
@@ -36,26 +34,30 @@ fn main() -> Result<(), eframe::Error> {
             // This gives us image support:
             egui_extras::install_image_loaders(&cc.egui_ctx);
 
-            Box::new(MyApp::new(tx_serial, rx_gui))
+            Box::new(MyApp::new(tx_gui, rx_gui))
         }),
     )
 }
 
 struct MyApp {
-    tx_serial: Sender<SendToSerial>,
+    tx_serial: Option<Sender<SendToSerial>>,
+    tx_gui: Sender<SendToGui>,
     rx_gui: Receiver<SendToGui>,
     sel_port: usize,
     ports: Vec<String>,
     baud_rate: String,
     image: Vec<u8>,
     logs: String,
-    connected: bool,
+    connected: bool, // As for serial to device, no matter where it is
+    decided_backend: bool,
+    remote_address: String,
 }
 
 impl MyApp {
-    pub fn new(tx_serial: Sender<SendToSerial>, rx_gui: Receiver<SendToGui>) -> Self {
+    pub fn new(tx_gui: Sender<SendToGui>, rx_gui: Receiver<SendToGui>) -> Self {
         Self {
-            tx_serial,
+            tx_serial: None,
+            tx_gui,
             rx_gui,
             sel_port: 0,
             ports: Vec::new(),
@@ -63,7 +65,23 @@ impl MyApp {
             image: Vec::new(),
             logs: String::new(),
             connected: false,
+            decided_backend: false,
+            remote_address: String::from(":24377"),
         }
+    }
+}
+
+pub fn send_serial(tx_serial: Option<Sender<SendToSerial>>, message: SendToSerial) {
+    if let Some(tx_serial_new) = tx_serial {
+        let res = tx_serial_new.send(message.clone());
+        match res {
+            Ok(_) => {},
+            Err(x) => {
+                error!("Failed to send message {:?}, error message is: {}", message, x);
+            },
+        }
+    } else {
+        error!("Failed to obtain tx_serial");
     }
 }
 
@@ -94,9 +112,7 @@ impl eframe::App for MyApp {
                                     // Check if the number of weird bytes exceeds 30
                                     if matches.len() > 30 {
                                         debug!("We probably catched the scren, requesting an update...");
-                                        self.tx_serial
-                                            .send(SendMessage("screen:".to_string()))
-                                            .unwrap();
+                                        send_serial(self.tx_serial.clone(), SendMessage("screen:".to_string()));
                                     }
                                 }
                             }
@@ -127,14 +143,41 @@ impl eframe::App for MyApp {
                     .show_inside(ui, |ui| {
                         ui.heading("Settings");
 
-                        ui.label("Input the baud rate");
+                        if !self.decided_backend {
+                            ui.horizontal(|ui| {
+                                ui.label("Remote address:");
+                                ui.add(egui::TextEdit::singleline(&mut self.remote_address));
 
-                        ui.add(egui::TextEdit::singleline(&mut self.baud_rate));
 
-                        if ui.add(egui::Button::new("Scan for ports")).clicked() {
-                            if self.tx_serial.send(AskForPorts()).is_err() {
-                                error!("Failed to ask for ports");
+                            });
+                            if ui.add( egui::Button::new("Use remote")).clicked() {
+                                let tx_gui_clone = self.tx_gui.clone();
+                                let rem = self.remote_address.to_remote_addr().expect("Failed to convert to address");
+                                let (tx_serial, rx_serial) = channel();
+                                self.tx_serial = Some(tx_serial);
+                                thread::spawn(move || {
+                                    run_remote(rem, tx_gui_clone, rx_serial);
+                                });
+                                self.decided_backend = true;
                             }
+                            if ui.add( egui::Button::new("Use local")).clicked() {
+                                let tx_gui_clone = self.tx_gui.clone();
+                                let (tx_serial, rx_serial) = channel();
+                                self.tx_serial = Some(tx_serial);
+                                thread::spawn(move || {
+                                    serial::main(tx_gui_clone, rx_serial);
+                                });
+                                self.decided_backend = true;
+                            }
+                        }
+
+                        ui.horizontal(|ui| {
+                            ui.label("Baud rate:");
+                            ui.add_enabled(self.decided_backend, egui::TextEdit::singleline(&mut self.baud_rate));
+                        });
+
+                        if ui.add_enabled(self.decided_backend, egui::Button::new("Scan for ports")).clicked() {
+                            send_serial(self.tx_serial.clone(), AskForPorts());
                         }
 
                         if !self.ports.is_empty() {
@@ -156,13 +199,7 @@ impl eframe::App for MyApp {
                                 .clicked()
                             {
                                 let baud_rate: usize = self.baud_rate.parse().unwrap();
-                                if self
-                                    .tx_serial
-                                    .send(SelectPort(self.ports[self.sel_port].clone(), baud_rate))
-                                    .is_err()
-                                {
-                                    error!("Failed to ask for ports");
-                                }
+                                send_serial(self.tx_serial.clone(), SelectPort(self.ports[self.sel_port].clone(), baud_rate));
                                 self.connected = true;
                             }
                         }
@@ -171,61 +208,43 @@ impl eframe::App for MyApp {
                     ui.horizontal(|ui| {
                         if ui.add(egui::Button::new("Back")).clicked() {
                             debug!("Button to button clicked");
-                            self.tx_serial
-                                .send(SendMessage("back-button:".to_string()))
-                                .unwrap();
+                            send_serial(self.tx_serial.clone(), SendMessage("back-button:".to_string()));
                         }
                         if ui.add(egui::Button::new("Menu")).clicked() {
                             debug!("Button to button clicked");
-                            self.tx_serial
-                                .send(SendMessage("menu-button:".to_string()))
-                                .unwrap();
+                            send_serial(self.tx_serial.clone(), SendMessage("menu-button:".to_string()));
                         }
                         if ui.add(egui::Button::new("Up")).clicked() {
                             debug!("Button to button clicked");
-                            self.tx_serial
-                                .send(SendMessage("up-button:".to_string()))
-                                .unwrap();
+                            send_serial(self.tx_serial.clone(), SendMessage("up-button:".to_string()));
                         }
                         if ui.add(egui::Button::new("Down")).clicked() {
                             debug!("Button to button clicked");
-                            self.tx_serial
-                                .send(SendMessage("down-button:".to_string()))
-                                .unwrap();
+                            send_serial(self.tx_serial.clone(), SendMessage("down-button:".to_string()));
                         }
                     });
                     ui.horizontal(|ui| {
                         if ui.add(egui::Button::new("Long back")).clicked() {
                             debug!("Button to button clicked");
-                            self.tx_serial
-                                .send(SendMessage("long-back-button:".to_string()))
-                                .unwrap();
+                            send_serial(self.tx_serial.clone(), SendMessage("long-back-button:".to_string()));
                         }
                         if ui.add(egui::Button::new("Long menu")).clicked() {
                             debug!("Button to button clicked");
-                            self.tx_serial
-                                .send(SendMessage("long-menu-button:".to_string()))
-                                .unwrap();
+                            send_serial(self.tx_serial.clone(), SendMessage("long-menu-button:".to_string()));
                         }
                         if ui.add(egui::Button::new("Long up")).clicked() {
                             debug!("Button to button clicked");
-                            self.tx_serial
-                                .send(SendMessage("long-up-button:".to_string()))
-                                .unwrap();
+                            send_serial(self.tx_serial.clone(), SendMessage("long-up-button:".to_string()));
                         }
                         if ui.add(egui::Button::new("Long down")).clicked() {
                             debug!("Button to button clicked");
-                            self.tx_serial
-                                .send(SendMessage("long-down-button:".to_string()))
-                                .unwrap();
+                            send_serial(self.tx_serial.clone(), SendMessage("long-down-button:".to_string()));
                         }
                     });
                     ui.horizontal(|ui| {
                         if ui.add(egui::Button::new("Update screen")).clicked() {
                             debug!("Button to update screen clicked");
-                            self.tx_serial
-                                .send(SendMessage("screen:".to_string()))
-                                .unwrap();
+                            send_serial(self.tx_serial.clone(), SendMessage("screen:".to_string()));
                         }
                         if !self.image.is_empty() {
                             if ui.add(egui::Button::new("Open screen")).clicked() {
@@ -238,9 +257,7 @@ impl eframe::App for MyApp {
                             }
                             if ui.add(egui::Button::new("Reset")).clicked() {
                                 debug!("Button to reset the watchy clicked");
-                                self.tx_serial
-                                    .send(SendMessage("reset:".to_string()))
-                                    .unwrap();
+                                send_serial(self.tx_serial.clone(), SendMessage("reset:".to_string()));
                             }
                         }
                     });
