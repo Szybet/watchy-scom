@@ -1,1 +1,5 @@
 target/
+ws-serial-tcp/src/api.rs
+ws-serial-tcp/src/serial.rs
+watchy-scom/src/api.rs
+watchy-scom/src/serial.rs
