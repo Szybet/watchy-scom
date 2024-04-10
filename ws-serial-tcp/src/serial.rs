@@ -29,10 +29,7 @@ fn find_subsequence(vector: &[u8], subsequence: &[u8]) -> Option<usize> {
     None
 }
 
-pub fn main(
-    tx_gui: &mut Sender<SendToGui>,
-    rx_serial: &mut Receiver<SendToSerial>,
-) {
+pub fn main(tx_gui: Sender<SendToGui>, rx_serial: Receiver<SendToSerial>) {
     let mut port: Option<Box<dyn SerialPort>> = None;
     let mut serial_buf: Vec<u8> = Vec::with_capacity(16000); // 15000 is screen size
     let mut synced = false;
@@ -75,12 +72,21 @@ pub fn main(
                 }
                 SelectPort(port_name, baud_rate) => {
                     debug!("Received select port: {}", port_name);
-                    port = Some(
-                        serialport::new(port_name, baud_rate as u32) // ??? TODO: here 115_200 56000
-                            .timeout(Duration::from_millis(9999999))
-                            .open()
-                            .expect("Failed to open port"),
-                    );
+                    if let Some(ref mut rport) = port {
+                        debug!("Currently used port name: {:?}", rport.name());
+                        if port_name == rport.name().unwrap() {
+                            debug!("The same port is already selected, skipping");
+                            continue;
+                        }
+                    }
+                    let res = serialport::new(port_name, baud_rate as u32)
+                        .timeout(Duration::from_millis(9999999))
+                        .open();
+                    if res.is_err() {
+                        error!("Failed to open port, reason: {:?}", res);
+                        std::process::exit(0);
+                    }
+                    port = Some(res.unwrap());
                     thread::sleep(time::Duration::from_millis(100));
                     if let Some(ref mut rport) = port {
                         if rport.write_all("screen:".as_bytes()).is_err() {

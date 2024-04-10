@@ -12,9 +12,10 @@ use message_io::node::{self, NodeHandler};
 use std::net::ToSocketAddrs;
 
 // Threads
-use std::sync::mpsc;
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 // Arguments
 use clap::Parser;
@@ -48,8 +49,7 @@ pub fn send_network(
 
 fn main() {
     env_logger::init_from_env(
-        env_logger::Env::default()
-            .filter_or(env_logger::DEFAULT_FILTER_ENV, "none,ws-serial-tcp=debug"),
+        env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "debug"),
     );
     debug!("Starting ws-serial-tcp");
 
@@ -58,9 +58,9 @@ fn main() {
     let mut endpoint_saved: Option<Endpoint> = None;
 
     // Threads
-    let (mut tx_gui, rx_gui) = mpsc::channel();
+    let (tx_gui, rx_gui) = mpsc::channel();
     let (tx_main, rx_main) = mpsc::channel();
-    let (tx_serial, mut rx_serial) = mpsc::channel();
+    let (tx_serial, rx_serial) = mpsc::channel();
 
     // Network
     let addr = ("0.0.0.0", args.port)
@@ -81,27 +81,28 @@ fn main() {
         server::run(network_handler_server, listener, tx_serial, tx_main);
     });
 
-    // This will wait untill connection
-    if let Ok(event) = rx_main.recv() {
-        match event {
-            ThreadCom::ClientConnected(endpoint, _resource_id) => {
-                info!("Server received: ClientConnected");
-                endpoint_saved = Some(endpoint);
-            }
-        }
-    }
-
     thread::spawn(move || {
-        serial::main(&mut tx_gui, &mut rx_serial);
+        serial::main(tx_gui, rx_serial);
     });
 
     loop {
-        match rx_gui.recv() {
+        match rx_gui.recv_timeout(Duration::from_millis(500)) {
             Ok(x) => {
                 send_network(&network_handler.clone(), endpoint_saved, x);
             }
             Err(x) => {
-                error!("Failed to recv {}", x);
+                if x != RecvTimeoutError::Timeout {
+                    error!("Failed to recv {}", x);
+                }
+            }
+        }
+        // This will wait untill connection
+        if let Ok(event) = rx_main.try_recv() {
+            match event {
+                ThreadCom::ClientConnected(endpoint, _resource_id) => {
+                    info!("Server received: ClientConnected");
+                    endpoint_saved = Some(endpoint);
+                }
             }
         }
     }
