@@ -18,7 +18,23 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::thread;
 use std::time::Duration;
 
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about)]
+struct Args {
+    #[arg(short, long)]
+    port: Option<String>,
+    #[arg(
+        short,
+        long
+    )]
+    baudrate: Option<i32>,
+}
+
 fn main() -> Result<(), eframe::Error> {
+    let args = Args::parse();
+
     let (tx_gui, rx_gui) = channel();
 
     env_logger::init();
@@ -27,6 +43,11 @@ fn main() -> Result<(), eframe::Error> {
         ..Default::default()
     };
 
+    let mut baudrate = String::from("921600");
+    if let Some(baud_rate_args) = args.baudrate {
+        baudrate = format!("{}", baud_rate_args);
+    }
+
     eframe::run_native(
         "watchy-scom",
         options,
@@ -34,7 +55,7 @@ fn main() -> Result<(), eframe::Error> {
             // This gives us image support:
             egui_extras::install_image_loaders(&cc.egui_ctx);
 
-            Box::new(MyApp::new(tx_gui, rx_gui))
+            Box::new(MyApp::new(tx_gui, rx_gui, args.port, baudrate))
         }),
     )
 }
@@ -44,6 +65,7 @@ struct MyApp {
     tx_gui: Sender<SendToGui>,
     rx_gui: Receiver<SendToGui>,
     sel_port: usize,
+    port: Option<String>, // Argument overwrite
     ports: Vec<String>,
     baud_rate: String,
     image: Vec<u8>,
@@ -51,22 +73,25 @@ struct MyApp {
     connected: bool, // As for serial to device, no matter where it is
     decided_backend: bool,
     remote_address: String,
+    first_run: bool,
 }
 
 impl MyApp {
-    pub fn new(tx_gui: Sender<SendToGui>, rx_gui: Receiver<SendToGui>) -> Self {
+    pub fn new(tx_gui: Sender<SendToGui>, rx_gui: Receiver<SendToGui>, port: Option<String>, baudrate: String) -> Self {
         Self {
             tx_serial: None,
             tx_gui,
             rx_gui,
             sel_port: 0,
+            port: port.clone(),
             ports: Vec::new(),
-            baud_rate: String::from("921600"),
+            baud_rate: baudrate,
             image: Vec::new(),
             logs: String::new(),
             connected: false,
-            decided_backend: false,
+            decided_backend: port.is_some(),
             remote_address: String::from(":24377"),
+            first_run: false,
         }
     }
 }
@@ -88,6 +113,29 @@ pub fn send_serial(tx_serial: Option<Sender<SendToSerial>>, message: SendToSeria
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
+
+            if self.first_run == false {
+                self.first_run = true;
+                if self.decided_backend == true && self.port.is_some() {
+                    // create local thing
+                    let tx_gui_clone = self.tx_gui.clone();
+                    let (tx_serial, rx_serial) = channel();
+                    self.tx_serial = Some(tx_serial);
+                    thread::spawn(move || {
+                        serial::main(tx_gui_clone, rx_serial);
+                    });
+                    self.decided_backend = true;
+
+                    let baud_rate: usize = self.baud_rate.parse().unwrap();
+                    send_serial(self.tx_serial.clone(), SelectPort(self.port.clone().unwrap(), baud_rate));
+                    self.connected = true;
+                    
+                    self.ports.push("".to_string());
+                    self.ports.push(self.port.clone().unwrap());
+                    self.sel_port = 1;
+                }
+            }
+
             match self.rx_gui.recv_timeout(Duration::from_millis(25)) {
                 Ok(x) => match x {
                     SendToGui::Ports(x) => {
