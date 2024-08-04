@@ -299,6 +299,8 @@ impl eframe::App for MyApp {
                                 debug!("Button to save image clicked");
                                 let _ = std::fs::write("/tmp/watchy-scom.png", &self.image.clone());
                                 Command::new("kolourpaint")
+                                    .arg("-platform")
+                                    .arg("wayland")
                                     .arg("/tmp/watchy-scom.png")
                                     .spawn()
                                     .expect("failed to execute process");
