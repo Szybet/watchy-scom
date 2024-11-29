@@ -298,9 +298,7 @@ impl eframe::App for MyApp {
                             if ui.add(egui::Button::new("Open screen")).clicked() {
                                 debug!("Button to save image clicked");
                                 let _ = std::fs::write("/tmp/watchy-scom.png", &self.image.clone());
-                                Command::new("kolourpaint")
-                                    .arg("-platform")
-                                    .arg("wayland")
+                                Command::new("code")
                                     .arg("/tmp/watchy-scom.png")
                                     .spawn()
                                     .expect("failed to execute process");
